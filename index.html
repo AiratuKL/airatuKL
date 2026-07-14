@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AiratuKL Chat App</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        .hidden { display: none !important; }
+        h2 { margin-bottom: 20px; text-align: center; color: #333; }
+        input { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 4px; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-google { background: #4285f4; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-link { background: none; color: #007bff; text-align: center; width: 100%; font-size: 14px; }
+        
+        /* Chat Style */
+        .chat-container { max-width: 600px; width: 100%; height: 90vh; display: flex; flex-direction: column; }
+        .chat-header { padding: 15px; background: #007bff; color: white; display: flex; justify-content: space-between; align-items: center; border-radius: 8px 8px 0 0; }
+        .messages-box { flex: 1; padding: 15px; overflow-y: auto; background: #e5ddd5; display: flex; flex-direction: column; gap: 10px; }
+        .msg { padding: 10px 14px; border-radius: 8px; max-width: 75%; word-wrap: break-word; }
+        .msg.sent { background: #dcf8c6; align-self: flex-end; }
+        .msg.received { background: white; align-self: flex-start; }
+        .msg-input-area { display: flex; padding: 10px; background: white; border-radius: 0 0 8px 8px; gap: 10px; }
+        .msg-input-area input { margin-bottom: 0; }
+        .msg-input-area button { margin-bottom: 0; width: auto; padding: 0 20px; }
+        .user-info { font-size: 12px; color: #666; margin-bottom: 2px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. HALAMAN LOGIN / REGISTER -->
+    <div id="auth-page" class="container">
+        <h2 id="auth-title">Masuk ke AiratuKL</h2>
+        <input type="email" id="email" placeholder="Alamat Email">
+        <input type="password" id="password" placeholder="Kata Sandi">
+        
+        <button class="btn-primary" id="btn-main-action">Masuk</button>
+        <button class="btn-google" id="btn-google-login">Masuk dengan Google</button>
+        <button class="btn-link" id="btn-toggle-auth">Belum punya akun? Daftar sekarang</button>
+    </div>
+
+    <!-- 2. HALAMAN CHAT (DIPROTEKSI) -->
+    <div id="chat-page" class="container chat-container hidden">
+        <div class="chat-header">
+            <span id="welcome-user">Halo, Pengguna</span>
+            <button class="btn-danger" id="btn-logout" style="width: auto; padding: 6px 12px; margin: 0;">Keluar</button>
+        </div>
+        <div class="messages-box" id="messages-box"></div>
+        <div class="msg-input-area">
+            <input type="text" id="chat-input" placeholder="Ketik pesan di sini...">
+            <button class="btn-primary" id="btn-send">Kirim</button>
+        </div>
+    </div>
+
+    <!-- SCRIPT FIREBASE (MODULAR SDK) -->
+    <script type="module">
+        import { initializeApp } from "https://gstatic.com";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://gstatic.com";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc } from "https://gstatic.com";
+
+        // Konfigurasi Proyek airatuKL milik Anda
+        const firebaseConfig = {
+            apiKey: "AIzaSyDsc-fUAdm89YduD4nrBUqszJYLDNY9Fjk",
+            authDomain: "://firebaseapp.com",
+            projectId: "airatukl-a8f42",
+            storageBucket: "airatukl-a8f42.firebasestorage.app",
+            messagingSenderId: "614783666393",
+            appId: "1:614783666393:web:d1cc8c4ac8a2e475f39ac8",
+            measurementId: "G-8XB3DBJSF5"
+        };
+
+        // Inisialisasi Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const googleProvider = new GoogleAuthProvider();
+
+        // Elemen DOM
+        const authPage = document.getElementById('auth-page');
+        const chatPage = document.getElementById('chat-page');
+        const authTitle = document.getElementById('auth-title');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const btnMainAction = document.getElementById('btn-main-action');
+        const btnGoogleLogin = document.getElementById('btn-google-login');
+        const btnToggleAuth = document.getElementById('btn-toggle-auth');
+        const welcomeUser = document.getElementById('welcome-user');
+        const btnLogout = document.getElementById('btn-logout');
+        const messagesBox = document.getElementById('messages-box');
+        const chatInput = document.getElementById('chat-input');
+        const btnSend = document.getElementById('btn-send');
+
+        let isLoginMode = true;
+
+        // Proteksi Halaman & Cek Sesi Otomatis
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                authPage.classList.add('hidden');
+                chatPage.classList.remove('hidden');
+                welcomeUser.textContent = user.displayName || user.email;
+                loadMessages();
+            } else {
+                authPage.classList.remove('hidden');
+                chatPage.classList.add('hidden');
+                messagesBox.innerHTML = '';
+            }
+        });
+
+        // Simpan atau Perbarui Profil Pengguna di Firestore
+        async function saveUserProfile(user) {
+            await setDoc(doc(db, "users", user.uid), {
+                uid: user.uid,
+                name: user.displayName || "Pengguna Email",
+                email: user.email,
+                lastLogin: serverTimestamp()
+            }, { merge: true });
+        }
+
+        // Aksi Registrasi / Login Manual Email
+        btnMainAction.addEventListener('click', async () => {
+            const email = emailInput.value.trim();
+            const password = passwordInput.value.trim();
+            if(!email || !password) return alert('Isi email dan password terlebih dahulu!');
+
+            try {
+                if (isLoginMode) {
+                    await signInWithEmailAndPassword(auth, email, password);
+                } else {
+                    const res = await createUserWithEmailAndPassword(auth, email, password);
+                    await saveUserProfile(res.user);
+                    alert('Registrasi akun berhasil!');
+                }
+            } catch (err) {
+                alert('Terjadi kesalahan: ' + err.message);
+            }
+        });
+
+        // Aksi Login Menggunakan Google Popup
+        btnGoogleLogin.addEventListener('click', async () => {
+            try {
+                const res = await signInWithPopup(auth, googleProvider);
+                await saveUserProfile(res.user);
+            } catch (err) {
+                alert('Gagal login Google: ' + err.message);
+            }
+        });
+
+        // Keluar Akun
+        btnLogout.addEventListener('click', () => signOut(auth));
+
+        // Switch Mode Tampilan antara Login dan Daftar
+        btnToggleAuth.addEventListener('click', () => {
+            isLoginMode = !isLoginMode;
+            authTitle.textContent = isLoginMode ? "Masuk ke AiratuKL" : "Daftar Akun Baru";
+            btnMainAction.textContent = isLoginMode ? "Masuk" : "Daftar";
+            btnToggleAuth.textContent = isLoginMode ? "Belum punya akun? Daftar sekarang" : "Sudah punya akun? Masuk di sini";
+        });
+
+        // Fungsi Mengirim Pesan Chat ke Firestore
+        async function sendMessage() {
+            const text = chatInput.value.trim();
+            const user = auth.currentUser;
+            if (!text || !user) return;
+
+            try {
+                await addDoc(collection(db, "chats"), {
+                    uid: user.uid,
+                    senderName: user.displayName || user.email,
+                    message: text,
+                    timestamp: serverTimestamp()
+                });
+                chatInput.value = '';
+            } catch (err) {
+                console.error("Gagal mengirim pesan:", err);
+            }
+        }
+
+        btnSend.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+        // Memuat Pesan Chat Secara Realtime
+        function loadMessages() {
+            const q = query(collection(db, "chats"), orderBy("timestamp", "asc"));
+            onSnapshot(q, (snapshot) => {
+                messagesBox.innerHTML = '';
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const isMe = data.uid === auth.currentUser.uid;
+                    
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = `msg ${isMe ? 'sent' : 'received'}`;
+                    
+                    msgDiv.innerHTML = `
+                        <div class="user-info">${isMe ? 'Anda' : data.senderName}</div>
+                        <div>${data.message}</div>
+                    `;
+                    messagesBox.appendChild(msgDiv);
+                });
+                messagesBox.scrollTop = messagesBox.scrollHeight;
+            });
+        }
+    </script>

@@ -1,0 +1,2 @@
+// Hook siap integrasi Cropper.js. Preview lokal, zoom/rotate dilakukan via CSS transform.
+let scale=1,rotation=0;const img=document.querySelector('#profilePreview');document.querySelector('#profileUpload')?.addEventListener('change',e=>{const f=e.target.files[0];if(f)img.src=URL.createObjectURL(f)});window.adjustPhoto=(ds=0,dr=0)=>{scale=Math.max(.5,scale+ds);rotation+=dr;img.style.transform=`scale(${scale}) rotate(${rotation}deg)`};
